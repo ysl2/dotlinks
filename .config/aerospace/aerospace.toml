@@ -40,8 +40,10 @@ inner.horizontal = 10
 inner.vertical = 10
 outer.left = 10
 outer.bottom = 10
-outer.top = 10
-outer.right = 10
+# Ref: https://github.com/nikitabobko/AeroSpace/issues/265#issuecomment-2158967297
+# outer.top = 15
+outer.top = [{ monitor."HDMI" = 45 }, { monitor."Sidecar" = 45 }, { monitor."237E4" = 45 },  15]
+outer.right = [{ monitor."237E4" = 20 },  10]
 
 [mode.main.binding]
 # See: https://nikitabobko.github.io/AeroSpace/goodness#open-a-new-window-with-applescript
