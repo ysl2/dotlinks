@@ -13,7 +13,7 @@ PLUGIN_DIR="$CONFIG_DIR/plugins"
 # If you are looking for other colors, see the color picker:
 # https://felixkratz.github.io/SketchyBar/config/tricks#color-picker
 
-sketchybar --bar position=top height=35 blur_radius=30 color=0x40000000
+sketchybar --bar position=top height=35 blur_radius=30 color=0x80000000
 
 ##### Changing Defaults #####
 # We now change some default values, which are applied to all further items.
@@ -70,7 +70,7 @@ for m in $(aerospace list-monitors | awk '{print $1}'); do
         sketchybar --add item space."$i" left \
             --subscribe space."$i" aerospace_workspace_change aerospace_focus_change \
             --set space."$i" \
-                background.color=0x44ffffff \
+                background.color=0x60ffffff \
                 background.corner_radius=5 \
                 background.height=20 \
                 background.drawing=off \
