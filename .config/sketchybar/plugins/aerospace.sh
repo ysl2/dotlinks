@@ -2,22 +2,33 @@
 
 
 main() {
-    local i="$1"
-    local m="$2"
+    local workspace="$1"
+    local focused_workspace="${FOCUSED_WORKSPACE:-}"
+    local monitor_id
+    local window_count
 
-    # Highlight the focused workspace.
-    if { [ "$SENDER" = aerospace_workspace_change ] && [ "$i" = "$FOCUSED_WORKSPACE" ]; } ||
-        { [ "$SENDER" = aerospace_focus_change ] && [ "$i" = "$(aerospace list-workspaces --focused)" ]; }; then
-        sketchybar --set "$NAME" background.drawing=on display="$m" &
+    if [ -z "$focused_workspace" ]; then
+        focused_workspace="$(aerospace list-workspaces --focused)"
+    fi
+
+    monitor_id="$(
+        aerospace list-workspaces --all --format '%{workspace}|%{monitor-id}' \
+            | awk -F'|' -v workspace="$workspace" '$1 == workspace { print $2; exit }'
+    )"
+    if [ -z "$monitor_id" ]; then
+        monitor_id="$(aerospace list-monitors --focused --format '%{monitor-id}')"
+    fi
+
+    if [ "$workspace" = "$focused_workspace" ]; then
+        sketchybar --set "$NAME" background.drawing=on display="$monitor_id"
+        return
+    fi
+
+    window_count="$(aerospace list-windows --workspace "$workspace" --count)"
+    if [ "${window_count:-0}" -gt 0 ] 2>/dev/null; then
+        sketchybar --set "$NAME" background.drawing=off display="$monitor_id"
     else
-        sketchybar --set "$NAME" background.drawing=off &
-        # If workspace has window, show it.
-        if [ -n "$(aerospace list-windows --workspace "$i")" ]; then
-            sketchybar --set "$NAME" display="$m" &
-        else
-            # Else, hide it.
-            sketchybar --set "$NAME" display=0 &
-        fi
+        sketchybar --set "$NAME" background.drawing=off display=0
     fi
 }
 
