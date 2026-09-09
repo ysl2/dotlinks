@@ -52,13 +52,13 @@ QToolTip {
     padding: 0;
     margin: 0;
     background-color: rgba(0, 0, 0, 25%);
-    border-radius: 8px;
 }
 .widget {
     padding: 0 12px;
     margin: 0;
 }
 .widget .label {
+    color: #C2DAF7;
     padding: 0px 2px;
 }
 .glazewm-workspaces {
@@ -72,15 +72,16 @@ QToolTip {
     margin: 0 2px 0 2px;
     color: #CDD6F4;
 }
-.glazewm-workspaces .ws-btn.active {
-    background-color: rgba(75, 115, 255, 0.5);
-}
 .glazewm-workspaces .ws-btn.populated {
     color: #C2DAF7;
 }
 .glazewm-workspaces .ws-btn.empty {
     color: #7D8B9D;
 }
+.glazewm-workspaces .ws-btn.active_populated,
+.glazewm-workspaces .ws-btn.active_empty,
+.glazewm-workspaces .ws-btn.focused_populated,
+.glazewm-workspaces .ws-btn.focused_empty,
 .glazewm-workspaces .ws-btn:hover,
 .glazewm-workspaces .ws-btn.populated:hover,
 .glazewm-workspaces .ws-btn.empty:hover {
@@ -144,4 +145,5 @@ QToolTip {
 }
 .glazewm-tiling-direction .btn {
     border: none;
+    color: #C2DAF7;
 }
