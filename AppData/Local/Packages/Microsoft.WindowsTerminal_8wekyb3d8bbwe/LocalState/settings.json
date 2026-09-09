@@ -3,16 +3,13 @@
     "$schema": "https://aka.ms/terminal-profiles-schema",
     "actions": [],
     "centerOnLaunch": true,
-    "confirmCloseAllTabs": false,
     "copyFormatting": "none",
     "copyOnSelect": false,
-    "defaultProfile": "{5aebf7ac-4981-5be1-874a-cc7137deeab1}",
+    "defaultProfile": "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
     "disableAnimations": true,
     "initialPosition": ",",
     "keybindings": [],
-    "largePasteWarning": false,
     "launchMode": "focus",
-    "multiLinePasteWarning": false,
     "newTabMenu": 
     [
         {
@@ -171,5 +168,8 @@
             "yellow": "#A2734C"
         }
     ],
-    "themes": []
+    "themes": [],
+    "warning.confirmCloseAllTabs": false,
+    "warning.largePaste": false,
+    "warning.multiLinePaste": "never"
 }
