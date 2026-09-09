@@ -259,7 +259,8 @@ keybindings:
   # `shell-exec %ProgramFiles%/Git/git-bash.exe` to start Windows
   # Terminal and Git Bash respectively.
   # - commands: ['shell-exec C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe']
-  - commands: ['shell-exec %USERPROFILE%\.vocal\Microsoft.WindowsTerminal\bin\wt.exe']
+  # - commands: ['shell-exec %USERPROFILE%\.vocal\Microsoft.WindowsTerminal\bin\wt.exe']
+  - commands: ['shell-exec %USERPROFILE%\.vocal\Microsoft.WindowsTerminal\bin\wt.exe -w new -p PowerShell']
   # - commands: ['shell-exec %USERPROFILE%\.vocal\wezterm\bin\wezterm-gui.exe']
   # - commands: ['shell-exec %USERPROFILE%\.vocal\wezterm\bin\wezterm-gui.exe start -- wsl -d arch']
     bindings: ['alt+enter']
