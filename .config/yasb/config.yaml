@@ -26,7 +26,6 @@ widgets:
     type: "glazewm.workspaces.GlazewmWorkspacesWidget"
     options:
       offline_label: "GlazeWM Offline"
-      hide_empty_workspaces: true
       hide_if_offline: false
   active_window:
     type: "yasb.active_window.ActiveWindowWidget"
@@ -93,12 +92,12 @@ widgets:
     type: "yasb.volume.VolumeWidget"
     options:
       label: "{icon} {level}"
-      volume_icons:
-        - "Vol:"  # Icon for muted
-        - "Vol:"  # Icon for 0-10% volume
-        - "Vol:"  # Icon for 11-30% volume
-        - "Vol:"  # Icon for 31-60% volume
-        - "Vol:"  # Icon for 61-100% volume
+      icons:
+        muted: "Vol:"
+        "10": "Vol:"
+        "30": "Vol:"
+        "60": "Vol:"
+        "100": "Vol:"
       audio_menu:
         blur: True
         round_corners: true
