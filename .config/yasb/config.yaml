@@ -18,7 +18,7 @@ bars:
         "disk",
         "volume",
         "battery",
-        "glazewm_tiling_direction",
+        # "glazewm_tiling_direction",
         "clock",
       ]
 widgets:
