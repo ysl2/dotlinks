@@ -68,8 +68,10 @@ QToolTip {
     font-size: 14px;
     background-color: transparent;
     border: none;
-    padding: 0px 4px 0px 4px;
-    margin: 0 2px 0 2px;
+    // padding: 0px 4px 0px 4px;
+    // margin: 0 2px 0 2px;
+    padding: 0px 8px 0px 8px;
+    margin: 0 0px 0 0px;
     color: #CDD6F4;
 }
 .glazewm-workspaces .ws-btn.populated {
