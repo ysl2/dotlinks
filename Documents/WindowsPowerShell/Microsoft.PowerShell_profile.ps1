@@ -121,7 +121,13 @@ Set-Alias py python
 # ===
 # === Outside sources
 # ===
-Invoke-Expression (&starship init powershell)
+if (Get-Command starship -ErrorAction Ignore) {
+    Invoke-Expression (&starship init powershell)
+}
+
+if (Get-Command atuin -ErrorAction Ignore) {
+    atuin init powershell | Out-String | Invoke-Expression
+}
 
 
 # ==================
