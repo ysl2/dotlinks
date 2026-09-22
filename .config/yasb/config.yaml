@@ -23,6 +23,7 @@ bars:
         # Temporarily disabled because YASB systray icons may disappear after Reload Bar.
         # Upstream issue: https://github.com/amnweb/yasb/issues/1097
         # "systray",
+        "weixin_unread",
       ]
 widgets:
   glazewm_workspaces:
@@ -160,7 +161,7 @@ widgets:
   #     class_name: "systray"
   #     label_collapsed: "\uE70D"
   #     label_expanded: "\uE70E"
-  #     label_position: "right"
+  #     label_position: "left"
   #     icon_size: 16
   #     pin_click_modifier: "ctrl"
   #     show_unpinned: true
@@ -182,3 +183,23 @@ widgets:
   #     hide_icons: []
   #     tooltip: false
   #     use_hook: true
+  weixin_unread:
+    type: "yasb.custom.CustomWidget"
+    options:
+      class_name: "weixin-unread"
+      label: "{data}"
+      label_alt: ""
+      label_placeholder: ""
+      label_max_length: null
+      tooltip: false
+      exec_options:
+        run_cmd: 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\Users\songliyu\.config\yasb\scripts\weixin-unread-badge.ps1'
+        run_once: false
+        run_interval: 1000
+        return_format: "string"
+        hide_empty: false
+        use_shell: false
+      callbacks:
+        on_left: "do_nothing"
+        on_middle: "do_nothing"
+        on_right: "do_nothing"

@@ -153,7 +153,7 @@ QToolTip {
  * Systray styles are temporarily disabled with the widget because of
  * https://github.com/amnweb/yasb/issues/1097
 .systray {
-    padding: 0 6px;
+    padding: 0 0 0 6px;
 }
 .systray .button {
     padding: 0 4px;
@@ -190,3 +190,16 @@ QToolTip {
     background-color: rgba(255, 255, 255, 0.10);
 }
 */
+.container-right {
+    padding-right: 18px;
+}
+.weixin-unread,
+.weixin-unread .widget-container,
+.weixin-unread .label {
+    min-width: 30px;
+    max-width: 30px;
+    min-height: 30px;
+    max-height: 30px;
+    padding: 0;
+    margin: 0;
+}
