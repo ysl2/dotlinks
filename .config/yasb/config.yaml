@@ -23,7 +23,7 @@ bars:
         # Temporarily disabled because YASB systray icons may disappear after Reload Bar.
         # Upstream issue: https://github.com/amnweb/yasb/issues/1097
         # "systray",
-        "weixin_unread",
+        "weixin",
       ]
 widgets:
   glazewm_workspaces:
@@ -183,10 +183,10 @@ widgets:
   #     hide_icons: []
   #     tooltip: false
   #     use_hook: true
-  weixin_unread:
+  weixin:
     type: "yasb.custom.CustomWidget"
     options:
-      class_name: "weixin-unread"
+      class_name: "weixin"
       label: "{data}"
       label_alt: ""
       label_placeholder: ""
@@ -197,7 +197,7 @@ widgets:
         run_once: false
         run_interval: 1000
         return_format: "string"
-        hide_empty: false
+        hide_empty: true
         use_shell: false
       callbacks:
         on_left: "do_nothing"

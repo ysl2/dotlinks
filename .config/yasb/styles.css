@@ -193,9 +193,9 @@ QToolTip {
 .container-right {
     padding-right: 18px;
 }
-.weixin-unread,
-.weixin-unread .widget-container,
-.weixin-unread .label {
+.weixin,
+.weixin .widget-container,
+.weixin .label {
     min-width: 30px;
     max-width: 30px;
     min-height: 30px;

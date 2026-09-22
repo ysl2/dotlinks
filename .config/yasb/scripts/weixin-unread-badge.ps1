@@ -1,40 +1,34 @@
 $ErrorActionPreference = 'Stop'
 
+$stateVersion = 2
 $badgeSlotSize = 30
 $canvasWidth = $badgeSlotSize
 $canvasHeight = $badgeSlotSize
+$iconSize = 16
+$weixinPath = 'C:\Program Files\Tencent\Weixin\Weixin.exe'
 $cacheDirectory = Join-Path $env:TEMP 'yasb-weixin-unread'
+$statePath = Join-Path $cacheDirectory 'state.json'
+$iconPath = Join-Path $cacheDirectory 'weixin-color.png'
 [void][System.IO.Directory]::CreateDirectory($cacheDirectory)
-
-$slot = [int]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() % 2)
-$outputPath = Join-Path $cacheDirectory "badge-$slot.png"
-$temporaryPath = Join-Path $cacheDirectory "badge-$slot.tmp.png"
 
 Add-Type -AssemblyName System.Drawing
 
-$canvas = New-Object System.Drawing.Bitmap(
-    $canvasWidth,
-    $canvasHeight,
-    [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
-)
+function Initialize-NativeMethods {
+    if ('WeixinUnread.NativeMethods' -as [type]) {
+        return
+    }
 
-$windowBitmap = $null
-$windowGraphics = $null
-$badgeBitmap = $null
-$scaledBadgeBitmap = $null
-
-try {
-    Add-Type -AssemblyName UIAutomationClient
-
-    if (-not ('WeixinUnread.NativeMethods' -as [type])) {
-        Add-Type -TypeDefinition @'
+    Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace WeixinUnread
 {
     public static class NativeMethods
     {
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
         [StructLayout(LayoutKind.Sequential)]
         public struct RECT
         {
@@ -43,6 +37,13 @@ namespace WeixinUnread
             public int Right;
             public int Bottom;
         }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -55,10 +56,295 @@ namespace WeixinUnread
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+
+        public static IntPtr[] GetTopLevelWindows(int processId)
+        {
+            var windows = new List<IntPtr>();
+            EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
+            {
+                uint ownerProcessId;
+                GetWindowThreadProcessId(hWnd, out ownerProcessId);
+                if (ownerProcessId == (uint)processId)
+                {
+                    windows.Add(hWnd);
+                }
+                return true;
+            }, IntPtr.Zero);
+            return windows.ToArray();
+        }
     }
 }
 '@
+}
+
+function Get-WeixinMainProcess {
+    $candidate = $null
+
+    try {
+        $candidate = Get-CimInstance Win32_Process -Filter "Name = 'Weixin.exe'" -ErrorAction Stop |
+            Where-Object {
+                $_.ExecutablePath -eq $weixinPath -and
+                $_.CommandLine -notmatch '(?i)(?:^|\s)--type='
+            } |
+            Sort-Object CreationDate |
+            Select-Object -First 1
     }
+    catch {
+        $candidate = $null
+    }
+
+    if ($candidate) {
+        $process = Get-Process -Id $candidate.ProcessId -ErrorAction SilentlyContinue
+    }
+    else {
+        $process = Get-Process Weixin -ErrorAction SilentlyContinue |
+            Where-Object {
+                try { $_.Path -eq $weixinPath }
+                catch { $false }
+            } |
+            Sort-Object StartTime |
+            Select-Object -First 1
+    }
+
+    if (-not $process) {
+        return $null
+    }
+
+    try {
+        $startTicks = $process.StartTime.ToUniversalTime().Ticks
+    }
+    catch {
+        $startTicks = 0
+    }
+
+    return [pscustomobject]@{
+        Process = $process
+        Signature = "{0}:{1}" -f $process.Id, $startTicks
+    }
+}
+
+function Get-WeixinWindow {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process
+    )
+
+    $Process.Refresh()
+    $handles = New-Object 'System.Collections.Generic.List[System.IntPtr]'
+    if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
+        [void]$handles.Add($Process.MainWindowHandle)
+    }
+    foreach ($handle in [WeixinUnread.NativeMethods]::GetTopLevelWindows($Process.Id)) {
+        if (-not $handles.Contains($handle)) {
+            [void]$handles.Add($handle)
+        }
+    }
+
+    $fallback = $null
+    foreach ($handle in $handles) {
+        try {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+            if (-not $root) {
+                continue
+            }
+
+            $window = [pscustomobject]@{
+                Handle = $handle
+                Root = $root
+            }
+            if ($root.Current.ClassName -eq 'mmui::MainWindow') {
+                return $window
+            }
+            if (-not $fallback -and $handle -eq $Process.MainWindowHandle) {
+                $fallback = $window
+            }
+        }
+        catch {
+            continue
+        }
+    }
+
+    return $fallback
+}
+
+function Read-WidgetState {
+    if (-not (Test-Path -LiteralPath $statePath)) {
+        return $null
+    }
+
+    try {
+        $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ([int]$state.Version -ne $stateVersion) {
+            return $null
+        }
+        return $state
+    }
+    catch {
+        return $null
+    }
+}
+
+function Save-WidgetState {
+    param(
+        [Parameter(Mandatory)]
+        $State
+    )
+
+    $temporaryStatePath = "$statePath.tmp"
+    $json = $State | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText(
+        $temporaryStatePath,
+        $json,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+    Move-Item -LiteralPath $temporaryStatePath -Destination $statePath -Force
+}
+
+function Save-BitmapAtomic {
+    param(
+        [Parameter(Mandatory)]
+        [System.Drawing.Bitmap]$Bitmap,
+
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $temporaryPath = "$Path.tmp.png"
+    if (Test-Path -LiteralPath $temporaryPath) {
+        Remove-Item -LiteralPath $temporaryPath -Force
+    }
+    $Bitmap.Save($temporaryPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+}
+
+function Write-ImageMarkup {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $imageUri = $Path.Replace('\', '/')
+    Write-Output "<img src=`"file:///$imageUri`" width=`"$badgeSlotSize`" height=`"$badgeSlotSize`">"
+}
+
+function Ensure-WeixinIcon {
+    if (Test-Path -LiteralPath $iconPath) {
+        return
+    }
+    if (-not (Test-Path -LiteralPath $weixinPath)) {
+        throw 'Weixin.exe was not found.'
+    }
+
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($weixinPath)
+    if (-not $icon) {
+        throw 'The Weixin icon could not be extracted.'
+    }
+
+    $bitmap = $null
+    try {
+        $bitmap = $icon.ToBitmap()
+        Save-BitmapAtomic -Bitmap $bitmap -Path $iconPath
+    }
+    finally {
+        if ($bitmap) {
+            $bitmap.Dispose()
+        }
+        $icon.Dispose()
+    }
+}
+
+function Draw-WeixinIcon {
+    param(
+        [Parameter(Mandatory)]
+        [System.Drawing.Bitmap]$Canvas
+    )
+
+    Ensure-WeixinIcon
+    $iconBitmap = [System.Drawing.Bitmap]::FromFile($iconPath)
+    $graphics = [System.Drawing.Graphics]::FromImage($Canvas)
+    try {
+        $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
+        $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $offset = [int](($badgeSlotSize - $iconSize) / 2)
+        $graphics.DrawImage(
+            $iconBitmap,
+            (New-Object System.Drawing.Rectangle($offset, $offset, $iconSize, $iconSize)),
+            0,
+            0,
+            $iconBitmap.Width,
+            $iconBitmap.Height,
+            [System.Drawing.GraphicsUnit]::Pixel
+        )
+    }
+    finally {
+        $graphics.Dispose()
+        $iconBitmap.Dispose()
+    }
+}
+
+function New-HiddenState {
+    param(
+        [string]$Signature,
+        [int]$LoginMissingCount,
+        [string]$LastError
+    )
+
+    return [ordered]@{
+        Version = $stateVersion
+        Signature = $Signature
+        LoggedIn = $false
+        LoginMissingCount = $LoginMissingCount
+        Visible = $false
+        Visual = ''
+        OutputPath = ''
+        BadgeAnchorRight = $null
+        BadgeCenterY = $null
+        WindowWidth = 0
+        WindowHeight = 0
+        LastError = $LastError
+        UpdatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    }
+}
+
+$mutex = New-Object System.Threading.Mutex($false, 'Local\YasbWeixinRenderV2')
+$lockTaken = $false
+
+try {
+    try {
+        $lockTaken = $mutex.WaitOne(0)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $lockTaken = $true
+    }
+
+    if (-not $lockTaken) {
+        $cachedState = Read-WidgetState
+        if (
+            $cachedState -and
+            $cachedState.Visible -and
+            (Test-Path -LiteralPath ([string]$cachedState.OutputPath))
+        ) {
+            Write-ImageMarkup -Path ([string]$cachedState.OutputPath)
+        }
+        return
+    }
+
+    $state = Read-WidgetState
+    $instance = Get-WeixinMainProcess
+    if (-not $instance) {
+        Save-WidgetState -State (New-HiddenState -Signature '' -LoginMissingCount 0 -LastError '')
+        return
+    }
+
+    $sameInstance = $state -and ([string]$state.Signature -eq $instance.Signature)
+    if (-not $sameInstance) {
+        $state = $null
+    }
+
+    Initialize-NativeMethods
+    Add-Type -AssemblyName UIAutomationClient
 
     # PER_MONITOR_AWARE_V2 keeps UI Automation and GetWindowRect in the same
     # coordinate space when Windows display scaling is enabled.
@@ -69,45 +355,210 @@ namespace WeixinUnread
         # The process may already have selected a DPI awareness context.
     }
 
-    $process = Get-Process Weixin -ErrorAction SilentlyContinue |
-        Where-Object { $_.MainWindowHandle -ne 0 } |
-        Select-Object -First 1
+    $signature = $instance.Signature
+    $previousLoggedIn = $state -and [bool]$state.LoggedIn
+    $previousVisible = $state -and [bool]$state.Visible
+    $previousOutputPath = if ($state) { [string]$state.OutputPath } else { '' }
+    $previousVisual = if ($state) { [string]$state.Visual } else { '' }
+    $loginMissingCount = if ($state) { [int]$state.LoginMissingCount } else { 0 }
+    $badgeAnchorRight = if ($state -and $null -ne $state.BadgeAnchorRight) {
+        [double]$state.BadgeAnchorRight
+    }
+    else {
+        $null
+    }
+    $badgeCenterY = if ($state -and $null -ne $state.BadgeCenterY) {
+        [double]$state.BadgeCenterY
+    }
+    else {
+        $null
+    }
+    $stateWindowWidth = if ($state) { [int]$state.WindowWidth } else { 0 }
+    $stateWindowHeight = if ($state) { [int]$state.WindowHeight } else { 0 }
+    $lastError = ''
+    $badgeRect = $null
+    $usingFallbackRect = $false
+    $loggedIn = $false
+    $window = Get-WeixinWindow -Process $instance.Process
 
-    if (-not $process) {
-        throw 'No Weixin main window was found.'
+    if ($window) {
+        try {
+            $root = $window.Root
+            $allDescendants = $root.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition
+            )
+            $mainTabCondition = New-Object System.Windows.Automation.PropertyCondition(
+                [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+                'mmui::MainTabBar'
+            )
+            $mainTabBar = $root.FindFirst(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $mainTabCondition
+            )
+
+            if ($mainTabBar) {
+                $loggedIn = $true
+                $loginMissingCount = 0
+                $badgeCondition = New-Object System.Windows.Automation.PropertyCondition(
+                    [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+                    'mmui::XBadge'
+                )
+                $badges = $root.FindAll(
+                    [System.Windows.Automation.TreeScope]::Descendants,
+                    $badgeCondition
+                )
+                $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+                $targetBadge = $null
+
+                foreach ($badge in $badges) {
+                    $parent = $walker.GetParent($badge)
+                    if ($parent -and $parent.Current.Name -in @('Weixin', '微信')) {
+                        $targetBadge = $badge
+                        break
+                    }
+                }
+
+                if ($targetBadge) {
+                    $candidateRect = $targetBadge.Current.BoundingRectangle
+                    if ($candidateRect.Width -ge 2 -and $candidateRect.Height -ge 2) {
+                        $badgeRect = $candidateRect
+                        $anchorWindowRect = New-Object WeixinUnread.NativeMethods+RECT
+                        if ([WeixinUnread.NativeMethods]::GetWindowRect(
+                            $window.Handle,
+                            [ref]$anchorWindowRect
+                        )) {
+                            $stateWindowWidth = $anchorWindowRect.Right - $anchorWindowRect.Left
+                            $stateWindowHeight = $anchorWindowRect.Bottom - $anchorWindowRect.Top
+                            $badgeAnchorRight = (
+                                $candidateRect.Left + $candidateRect.Width -
+                                $anchorWindowRect.Left
+                            )
+                            $badgeCenterY = (
+                                $candidateRect.Top + ($candidateRect.Height / 2.0) -
+                                $anchorWindowRect.Top
+                            )
+                        }
+                    }
+                }
+            }
+            elseif ($allDescendants.Count -gt 0) {
+                $loginMissingCount++
+                if ($previousLoggedIn -and $loginMissingCount -lt 2) {
+                    Save-WidgetState -State ([ordered]@{
+                        Version = $stateVersion
+                        Signature = $signature
+                        LoggedIn = $true
+                        LoginMissingCount = $loginMissingCount
+                        Visible = $previousVisible
+                        Visual = $previousVisual
+                        OutputPath = $previousOutputPath
+                        BadgeAnchorRight = $badgeAnchorRight
+                        BadgeCenterY = $badgeCenterY
+                        WindowWidth = $stateWindowWidth
+                        WindowHeight = $stateWindowHeight
+                        LastError = 'MainTabBar was missing from a non-empty UIA tree.'
+                        UpdatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+                    })
+                    if ($previousVisible -and (Test-Path -LiteralPath $previousOutputPath)) {
+                        Write-ImageMarkup -Path $previousOutputPath
+                    }
+                    return
+                }
+
+                Save-WidgetState -State (
+                    New-HiddenState `
+                        -Signature $signature `
+                        -LoginMissingCount $loginMissingCount `
+                        -LastError 'MainTabBar was missing from a non-empty UIA tree.'
+                )
+                return
+            }
+            else {
+                $lastError = 'The Weixin UIA tree was empty.'
+            }
+        }
+        catch {
+            $lastError = $_.Exception.Message
+        }
+    }
+    else {
+        $lastError = 'No Weixin main window was found.'
     }
 
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
-    $badgeCondition = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
-        'mmui::XBadge'
-    )
-    $badges = $root.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $badgeCondition
-    )
-    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
-    $targetBadge = $null
+    if (-not $loggedIn) {
+        if (-not $previousLoggedIn) {
+            Save-WidgetState -State (
+                New-HiddenState -Signature $signature -LoginMissingCount 0 -LastError $lastError
+            )
+            return
+        }
 
-    foreach ($badge in $badges) {
-        $parent = $walker.GetParent($badge)
-        if ($parent -and $parent.Current.Name -in @('Weixin', '微信')) {
-            $targetBadge = $badge
-            break
+        $loggedIn = $true
+        if ($window -and $null -ne $badgeAnchorRight -and $null -ne $badgeCenterY) {
+            $fallbackWindowRect = New-Object WeixinUnread.NativeMethods+RECT
+            if ([WeixinUnread.NativeMethods]::GetWindowRect(
+                $window.Handle,
+                [ref]$fallbackWindowRect
+            )) {
+                $fallbackWindowWidth = $fallbackWindowRect.Right - $fallbackWindowRect.Left
+                $fallbackWindowHeight = $fallbackWindowRect.Bottom - $fallbackWindowRect.Top
+                if (
+                    $fallbackWindowWidth -eq $stateWindowWidth -and
+                    $fallbackWindowHeight -eq $stateWindowHeight
+                ) {
+                    $fallbackRight = $fallbackWindowRect.Left + $badgeAnchorRight
+                    $fallbackTop = $fallbackWindowRect.Top + $badgeCenterY - 16
+                    $badgeRect = [pscustomobject]@{
+                        Left = $fallbackRight - 40
+                        Top = $fallbackTop
+                        Width = 40
+                        Height = 32
+                    }
+                    $usingFallbackRect = $true
+                }
+            }
+        }
+
+        if (-not $badgeRect -and $previousVisible -and (Test-Path -LiteralPath $previousOutputPath)) {
+            Save-WidgetState -State ([ordered]@{
+                Version = $stateVersion
+                Signature = $signature
+                LoggedIn = $true
+                LoginMissingCount = $loginMissingCount
+                Visible = $true
+                Visual = $previousVisual
+                OutputPath = $previousOutputPath
+                BadgeAnchorRight = $badgeAnchorRight
+                BadgeCenterY = $badgeCenterY
+                WindowWidth = $stateWindowWidth
+                WindowHeight = $stateWindowHeight
+                LastError = $lastError
+                UpdatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+            })
+            Write-ImageMarkup -Path $previousOutputPath
+            return
         }
     }
 
-    if (-not $targetBadge) {
-        throw 'The Weixin chat-tab badge was not found.'
-    }
+    $windowHandle = if ($window) { $window.Handle } else { [IntPtr]::Zero }
+    $canvas = New-Object System.Drawing.Bitmap(
+        $canvasWidth,
+        $canvasHeight,
+        [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+    )
+    $windowBitmap = $null
+    $windowGraphics = $null
+    $badgeBitmap = $null
+    $scaledBadgeBitmap = $null
+    $captureSucceeded = $false
+    $hasNumericBadge = $false
 
-    $badgeRect = $targetBadge.Current.BoundingRectangle
-    if ($badgeRect.Width -lt 2 -or $badgeRect.Height -lt 2) {
-        throw 'The Weixin chat-tab badge is not visible.'
-    }
+    if ($badgeRect -and $windowHandle -ne [IntPtr]::Zero) {
+        try {
 
     $windowRect = New-Object WeixinUnread.NativeMethods+RECT
-    if (-not [WeixinUnread.NativeMethods]::GetWindowRect($process.MainWindowHandle, [ref]$windowRect)) {
+    if (-not [WeixinUnread.NativeMethods]::GetWindowRect($windowHandle, [ref]$windowRect)) {
         throw 'GetWindowRect failed.'
     }
 
@@ -126,7 +577,7 @@ namespace WeixinUnread
     $windowHdc = $windowGraphics.GetHdc()
     try {
         $captured = [WeixinUnread.NativeMethods]::PrintWindow(
-            $process.MainWindowHandle,
+            $windowHandle,
             $windowHdc,
             2
         )
@@ -141,7 +592,7 @@ namespace WeixinUnread
 
     # UI Automation only provides the search area. Include a small border so
     # pixels outside the visible red badge remain connected to the crop edge.
-    $capturePadding = 2
+    $capturePadding = if ($usingFallbackRect) { 0 } else { 2 }
     $badgeLeft = [int][Math]::Floor($badgeRect.Left - $windowRect.Left)
     $badgeTop = [int][Math]::Floor($badgeRect.Top - $windowRect.Top)
     $badgeRight = [int][Math]::Ceiling(
@@ -351,6 +802,7 @@ namespace WeixinUnread
         # A dot-only badge has no enclosed white glyph and intentionally stays
         # as the fixed transparent placeholder.
         if ($whitePixelCount -ge 3) {
+            $hasNumericBadge = $true
             # Treat the longer badge dimension as a logical square side. Keep
             # the natural size inside the 30x30 slot and only shrink overflow.
             $squareSide = [Math]::Max($badgeWidth, $badgeHeight)
@@ -492,9 +944,10 @@ namespace WeixinUnread
             }
         }
     }
+    $captureSucceeded = $true
 }
 catch {
-    # Keep the fixed transparent canvas on any detection or capture failure.
+    $lastError = $_.Exception.Message
 }
 finally {
     if ($scaledBadgeBitmap) {
@@ -511,16 +964,71 @@ finally {
     }
 }
 
-try {
-    if (Test-Path -LiteralPath $temporaryPath) {
-        Remove-Item -LiteralPath $temporaryPath -Force
     }
-    $canvas.Save($temporaryPath, [System.Drawing.Imaging.ImageFormat]::Png)
-    Move-Item -LiteralPath $temporaryPath -Destination $outputPath -Force
+    else {
+        $captureSucceeded = $true
+    }
+
+    if (
+        -not $captureSucceeded -and
+        $previousVisible -and
+        (Test-Path -LiteralPath $previousOutputPath)
+    ) {
+        $canvas.Dispose()
+        Save-WidgetState -State ([ordered]@{
+            Version = $stateVersion
+            Signature = $signature
+            LoggedIn = $true
+            LoginMissingCount = $loginMissingCount
+            Visible = $true
+            Visual = $previousVisual
+            OutputPath = $previousOutputPath
+            BadgeAnchorRight = $badgeAnchorRight
+            BadgeCenterY = $badgeCenterY
+            WindowWidth = $stateWindowWidth
+            WindowHeight = $stateWindowHeight
+            LastError = $lastError
+            UpdatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+        })
+        Write-ImageMarkup -Path $previousOutputPath
+        return
+    }
+
+    if (-not $hasNumericBadge) {
+        Draw-WeixinIcon -Canvas $canvas
+    }
+
+    $slot = [int]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() % 2)
+    $outputPath = Join-Path $cacheDirectory "weixin-$slot.png"
+
+try {
+    Save-BitmapAtomic -Bitmap $canvas -Path $outputPath
 }
 finally {
     $canvas.Dispose()
 }
 
-$imageUri = $outputPath.Replace('\', '/')
-Write-Output "<img src=`"file:///$imageUri`" width=`"$canvasWidth`" height=`"$canvasHeight`">"
+    $visual = if ($hasNumericBadge) { 'badge' } else { 'icon' }
+    Save-WidgetState -State ([ordered]@{
+        Version = $stateVersion
+        Signature = $signature
+        LoggedIn = $true
+        LoginMissingCount = 0
+        Visible = $true
+        Visual = $visual
+        OutputPath = $outputPath
+        BadgeAnchorRight = $badgeAnchorRight
+        BadgeCenterY = $badgeCenterY
+        WindowWidth = $stateWindowWidth
+        WindowHeight = $stateWindowHeight
+        LastError = $lastError
+        UpdatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    })
+    Write-ImageMarkup -Path $outputPath
+}
+finally {
+    if ($lockTaken) {
+        $mutex.ReleaseMutex()
+    }
+    $mutex.Dispose()
+}
