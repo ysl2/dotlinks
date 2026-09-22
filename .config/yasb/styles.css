@@ -149,3 +149,44 @@ QToolTip {
     border: none;
     color: #C2DAF7;
 }
+/*
+ * Systray styles are temporarily disabled with the widget because of
+ * https://github.com/amnweb/yasb/issues/1097
+.systray {
+    padding: 0 6px;
+}
+.systray .button {
+    padding: 0 4px;
+    margin: 0;
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+}
+.systray .button:hover,
+.systray .unpinned-visibility-btn:hover {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+.systray .unpinned-visibility-btn {
+    padding: 0 4px;
+    margin: 0;
+    border: none;
+    background-color: transparent;
+    color: #C2DAF7;
+    font-family: "Segoe Fluent Icons";
+    font-size: 12px;
+}
+.systray-popup {
+    padding: 4px;
+    background-color: rgba(17, 17, 27, 0.85);
+}
+.systray-popup .button {
+    padding: 8px;
+    margin: 0;
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+}
+.systray-popup .button:hover {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+*/

@@ -20,6 +20,9 @@ bars:
         "battery",
         # "glazewm_tiling_direction",
         "clock",
+        # Temporarily disabled because YASB systray icons may disappear after Reload Bar.
+        # Upstream issue: https://github.com/amnweb/yasb/issues/1097
+        # "systray",
       ]
 widgets:
   glazewm_workspaces:
@@ -91,6 +94,7 @@ widgets:
   volume:
     type: "yasb.volume.VolumeWidget"
     options:
+      tooltip: false
       label: "{icon} {level}"
       icons:
         muted: "Vol:"
@@ -132,6 +136,7 @@ widgets:
   clock:
     type: "yasb.clock.ClockWidget"
     options:
+      tooltip: false
       label: "{%Y-%m-%d %a %H:%M:%S}"
       locale: ""
       update_interval: 1000
@@ -147,3 +152,33 @@ widgets:
         on_left: "do_nothing"
         on_middle: "do_nothing"
         on_right: "next_timezone"
+  # Temporarily disabled because YASB systray icons may disappear after Reload Bar.
+  # Restore this block together with the "systray" entry in the right widget list.
+  # systray:
+  #   type: "yasb.systray.SystrayWidget"
+  #   options:
+  #     class_name: "systray"
+  #     label_collapsed: "\uE70D"
+  #     label_expanded: "\uE70E"
+  #     label_position: "right"
+  #     icon_size: 16
+  #     pin_click_modifier: "ctrl"
+  #     show_unpinned: true
+  #     show_unpinned_button: true
+  #     show_in_popup: true
+  #     icons_per_row: 4
+  #     popup:
+  #       blur: true
+  #       round_corners: true
+  #       round_corners_type: "small"
+  #       border_color: "System"
+  #       alignment: "right"
+  #       direction: "down"
+  #       offset_top: 6
+  #       offset_left: 0
+  #     show_battery: false
+  #     show_volume: false
+  #     show_network: false
+  #     hide_icons: []
+  #     tooltip: false
+  #     use_hook: true
